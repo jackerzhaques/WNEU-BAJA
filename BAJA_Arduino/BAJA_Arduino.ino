@@ -7,7 +7,10 @@
 #include <Adafruit_Sensor.h>
 #include <Adafruit_BNO055.h>
 #include <utility/imumaths.h>
+#include <stdlib.h>
+#include <RH_RF95.h>
 #include <Wire.h>
+#include <SPI.h>
 
 /*
  * Software:  BAJA Realtime Monitor
@@ -22,6 +25,24 @@
  *  therefor the car) is monitored using a 6-axis accelorometer.
  *  
  */
+
+/* Arduino Micro */
+#if defined (__AVR_ATmega32U4__) 
+  /* G0 Pin - Has to be an external interrupt pin (RFM95_INT)*/
+  #define RFM95_INT     7 
+  #define RFM95_CS      8 
+  #define RFM95_RST     4
+  #define LED           13
+#endif
+
+/* Arduino Uno | Arduino Nano */
+#if defined (__AVR_ATmega328P__) 
+  /* G0 Pin - Has to be an external interrupt pin (RFM95_INT)*/
+  #define RFM95_INT     2 
+  #define RFM95_CS      4  
+  #define RFM95_RST     3  
+  #define LED           13
+#endif
 
 /*
  * Debugging defines
@@ -45,6 +66,9 @@
  #define  RPM_MIN                 10
  #define  RPM_MAX                 50
 
+ #define RF95_FREQ                915.0
+
+ RH_RF95 rf95(RFM95_CS, RFM95_INT);
  Adafruit_BNO055 IMU = Adafruit_BNO055(55);
 
  //Forward declarations
@@ -111,6 +135,45 @@ void setup() {
    delay(1000);
    IMU.setExtCrystalUse(true);
    
+   /* 
+    * Configure RFM9X LoRa radio 
+    */
+   #ifdef DEBUGGING_SETUP
+    Serial.println("Initializing LoRa TX Test!");
+   #endif 
+
+   pinMode(RFM95_RST, OUTPUT);
+   digitalWrite(RFM95_RST, HIGH);
+   delay(10);
+
+   /* Manual Reset */
+   digitalWrite(RFM95_RST, LOW);
+   delay(10);
+   digitalWrite(RFM95_RST, HIGH);
+   delay(10);
+
+   while (!rf95.init()) {
+    Serial.println("LoRa radio init failed");
+    while (1);
+  }
+  
+   Serial.println("LoRa radio init OK!");
+
+  /* Defaults after init are 434.0MHz, modulation GFSK_Rb250Fd250, +13dbM */
+  if (!rf95.setFrequency(RF95_FREQ)) {
+    Serial.println("setFrequency failed");
+    while (1);
+  }
+
+  Serial.print("Set Freq to: "); Serial.println(RF95_FREQ);
+
+  /* 
+   * The default transmitter power is 13dBm, using PA_BOOST.
+   * If you are using RFM95/96/97/98 modules which uses the PA_BOOST transmitter pin, then 
+   * you can set transmitter powers from 5 to 23 dBm:
+   */
+  rf95.setTxPower(23, false);
+
    #ifdef DEBUGGING_SETUP
     Serial.println("Initialization done");
    #endif
@@ -184,6 +247,10 @@ void ReadDOFAndPrint(){
   sensors_event_t event;
   IMU.getEvent(&event, Adafruit_BNO055::VECTOR_GYROSCOPE);
 
+  char radioPacket[10];
+  char buff[255];
+  String result = "";
+  
   Serial.print("X: ");
   Serial.print(event.orientation.x, 4);
   Serial.print("\tY: ");
@@ -199,6 +266,62 @@ void ReadDOFAndPrint(){
   Serial.print(AccEvent.acceleration.y, 4);
   Serial.print("\taZ: ");
   Serial.println(AccEvent.acceleration.z, 4);
+  
+  /*dtostrf(CurrentFrequency, 1, 1, radioPacket);
+  result += radioPacket;
+  result += ",";
+  strcat(buff,radioPacket);
+  dtostrf(event.orientation.x, 3, 4, radioPacket);
+  result += radioPacket;
+  result += ",";
+  Serial.println(radioPacket);
+  strcat(buff,radioPacket);
+  Serial.println(buff);
+  dtostrf(event.orientation.y, 3, 4, radioPacket);
+  result += radioPacket;
+  result += ",";
+  dtostrf(event.orientation.z, 3, 4, radioPacket);
+  result += radioPacket;
+  result += ",";
+  dtostrf(AccEvent.acceleration.x, 3, 4, radioPacket);
+  result += radioPacket;
+  result += ",";
+  dtostrf(AccEvent.acceleration.y, 3, 4, radioPacket);
+  result += radioPacket;
+  result += ",";
+  dtostrf(AccEvent.acceleration.z, 3, 4, radioPacket);
+  result += radioPacket;
+  result += ",";
+*/
+  Serial.print("In the packet: "); Serial.println(result);
+  result.toCharArray(buff, 255);
+
+  Serial.print("Sending "); Serial.println(buff);
+  Serial.println("Sending...");
+  rf95.send((uint8_t *)buff, 255);
+
+  /* Waiting for a reply */
+  uint8_t buf[RH_RF95_MAX_MESSAGE_LEN];
+  uint8_t len = sizeof(buf);
+
+  if (rf95.waitAvailableTimeout(100))
+  { 
+    // Should be a reply message for us now   
+    if (rf95.recv(buf, &len))
+   {
+      Serial.print("Got reply: ");
+      Serial.println((char*)buf);
+     
+    }
+    else
+    {
+      Serial.println("Receive failed");
+    }
+  }
+  else
+  {
+    Serial.println("No reply, is there a listener around?");
+  }
 }
 
 typedef struct sTask_tag{
@@ -225,7 +348,7 @@ sTask TaskList[] = {
     0,
     10,
     &ReadDOFAndPrint
-  }
+  },
 };
 
 uint8_t nTasks = sizeof(TaskList)/sizeof(sTask);
