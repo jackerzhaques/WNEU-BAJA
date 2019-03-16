@@ -182,14 +182,23 @@ void GetFreqMeasurement(){
 
 void ReadDOFAndPrint(){
   sensors_event_t event;
-  IMU.getEvent(&event);
+  IMU.getEvent(&event, Adafruit_BNO055::VECTOR_GYROSCOPE);
 
   Serial.print("X: ");
   Serial.print(event.orientation.x, 4);
   Serial.print("\tY: ");
   Serial.print(event.orientation.y, 4);
   Serial.print("\tZ: ");
-  Serial.println(event.orientation.z, 4);
+  Serial.print(event.orientation.z, 4);
+
+  sensors_event_t AccEvent;
+  IMU.getEvent(&AccEvent, Adafruit_BNO055::VECTOR_ACCELEROMETER);
+  Serial.print("\taX: ");
+  Serial.print(AccEvent.acceleration.x, 4);
+  Serial.print("\taY: ");
+  Serial.print(AccEvent.acceleration.y, 4);
+  Serial.print("\taZ: ");
+  Serial.println(AccEvent.acceleration.z, 4);
 }
 
 typedef struct sTask_tag{
